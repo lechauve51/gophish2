@@ -47,9 +47,11 @@ type GeneratedContent struct {
 	Rationale          string `json:"rationale"`
 }
 
-// Provider generates raw text completions from prompts.
+// Provider generates raw text completions from prompts and multi-turn chat
+// replies with tool calls.
 type Provider interface {
 	Generate(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+	Chat(ctx context.Context, messages []Message, tools []Tool) (*Reply, error)
 	Model() string
 }
 

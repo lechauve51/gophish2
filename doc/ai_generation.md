@@ -90,6 +90,33 @@ Same payload, plus:
   scenario, brief hash and authorization reference.
 - View-only users cannot use the endpoints (`EnforceViewOnly` applies).
 
+## Conversational agent: `POST /api/ai/chat`
+
+A multi-turn chat endpoint with tool calling. Talk to it in natural language
+(tell it your phishing domain, SMTP server, targets, scenario...) and it can
+inspect and configure the whole application: email templates, landing pages,
+target groups, SMTP sending profiles, campaigns, test emails, webhooks.
+
+```json
+{"message": "Mon domaine de phishing est https://phish.acme.fr, crée-moi une campagne invoice fraud en français pour tous les employés"}
+```
+
+- `conversation_id` (optional): returned on the first call; pass it back to
+  continue the same conversation. `GET /api/ai/chat?conversation_id=...`
+  returns the history. Conversations are kept in memory (24 h TTL).
+- The model calls tools server-side (`get_server_info`, `list_*`,
+  `generate_content`, `create_template`, `create_page`, `create_group`,
+  `create_sending_profile`, `create_campaign`, `send_test_email`,
+  `set_authorization`, ...). Tool definitions live in `ai/tools.go`.
+- Same guardrails: `generate_content` is always a dry run; `create_template`,
+  `create_page` and `create_campaign` require an authorization reference
+  (via `set_authorization` or the `authorization` field, which can also be
+  sent once per request); every tool execution is audit-logged; secrets
+  (SMTP passwords, API keys) are never logged or echoed back.
+- The chat loop is bounded (`maxChatIterations`) and rate limited.
+- Web UI: the **AI Assistant** entry in the sidebar opens a chat window on
+  every page (conversation persisted in `localStorage`).
+
 ## Web UI
 
 The **Email Templates** and **Landing Pages** pages have a "Generate with AI"

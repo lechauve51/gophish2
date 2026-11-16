@@ -25,8 +25,20 @@ type ChatProvider struct {
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Name       string         `json:"name,omitempty"`
+}
+
+type chatToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type chatRequest struct {
@@ -35,6 +47,8 @@ type chatRequest struct {
 	MaxTokens      int               `json:"max_tokens,omitempty"`
 	Temperature    float64           `json:"temperature"`
 	ResponseFormat map[string]string `json:"response_format,omitempty"`
+	Tools          []Tool            `json:"tools,omitempty"`
+	ToolChoice     interface{}       `json:"tool_choice,omitempty"`
 }
 
 type chatResponse struct {
@@ -70,11 +84,50 @@ func (p *ChatProvider) Model() string {
 	return p.model
 }
 
+// do performs the HTTP call and decodes the response.
+func (p *ChatProvider) do(ctx context.Context, reqBody chatRequest) (*chatResponse, error) {
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("AI provider request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("AI provider returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var cr chatResponse
+	if err := json.Unmarshal(body, &cr); err != nil {
+		return nil, fmt.Errorf("invalid AI provider response: %v", err)
+	}
+	if cr.Error != nil && cr.Error.Message != "" {
+		return nil, fmt.Errorf("AI provider error: %s", cr.Error.Message)
+	}
+	if len(cr.Choices) == 0 {
+		return nil, errors.New("AI provider returned no choices")
+	}
+	return &cr, nil
+}
+
 // Generate sends the prompts to the chat completions endpoint and returns the
 // raw content of the first choice. JSON mode is requested so the output can be
 // parsed as structured data.
 func (p *ChatProvider) Generate(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	reqBody := chatRequest{
+	cr, err := p.do(ctx, chatRequest{
 		Model: p.model,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
@@ -83,40 +136,57 @@ func (p *ChatProvider) Generate(ctx context.Context, systemPrompt, userPrompt st
 		MaxTokens:      p.maxTokens,
 		Temperature:    0.7,
 		ResponseFormat: map[string]string{"type": "json_object"},
-	}
-	raw, err := json.Marshal(reqBody)
+	})
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/completions", bytes.NewReader(raw))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("AI provider request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("AI provider returned status %d: %s", resp.StatusCode, string(body))
-	}
-	var cr chatResponse
-	if err := json.Unmarshal(body, &cr); err != nil {
-		return "", fmt.Errorf("invalid AI provider response: %v", err)
-	}
-	if cr.Error != nil && cr.Error.Message != "" {
-		return "", fmt.Errorf("AI provider error: %s", cr.Error.Message)
-	}
-	if len(cr.Choices) == 0 || cr.Choices[0].Message.Content == "" {
+	if cr.Choices[0].Message.Content == "" {
 		return "", errors.New("AI provider returned no content")
 	}
 	return cr.Choices[0].Message.Content, nil
+}
+
+// Chat runs a multi-turn conversation with tool calling enabled and returns
+// the model's text plus any requested tool calls.
+func (p *ChatProvider) Chat(ctx context.Context, messages []Message, tools []Tool) (*Reply, error) {
+	cmsgs := make([]chatMessage, 0, len(messages))
+	for _, m := range messages {
+		cm := chatMessage{
+			Role:       m.Role,
+			Content:    m.Content,
+			ToolCallID: m.ToolCallID,
+			Name:       m.Name,
+		}
+		for _, tc := range m.ToolCalls {
+			ctc := chatToolCall{ID: tc.ID, Type: tc.Type}
+			ctc.Function.Name = tc.Function.Name
+			ctc.Function.Arguments = tc.Function.Arguments
+			cm.ToolCalls = append(cm.ToolCalls, ctc)
+		}
+		cmsgs = append(cmsgs, cm)
+	}
+	cr, err := p.do(ctx, chatRequest{
+		Model:       p.model,
+		Messages:    cmsgs,
+		MaxTokens:   p.maxTokens,
+		Temperature: 0.4,
+		Tools:       tools,
+		ToolChoice:  "auto",
+	})
+	if err != nil {
+		return nil, err
+	}
+	msg := cr.Choices[0].Message
+	reply := &Reply{Content: msg.Content}
+	for _, ctc := range msg.ToolCalls {
+		reply.ToolCalls = append(reply.ToolCalls, ToolCall{
+			ID:   ctc.ID,
+			Type: ctc.Type,
+			Function: ToolCallFunc{
+				Name:      ctc.Function.Name,
+				Arguments: ctc.Function.Arguments,
+			},
+		})
+	}
+	return reply, nil
 }

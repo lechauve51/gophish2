@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gophish/gophish/ai"
 	"github.com/gophish/gophish/middleware/ratelimit"
 	"github.com/gophish/gophish/models"
 )
@@ -25,6 +26,11 @@ type mockAIProvider struct {
 func (m *mockAIProvider) Generate(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	m.calls++
 	return m.response, m.err
+}
+
+func (m *mockAIProvider) Chat(ctx context.Context, messages []ai.Message, tools []ai.Tool) (*ai.Reply, error) {
+	m.calls++
+	return nil, m.err
 }
 
 func (m *mockAIProvider) Model() string { return "mock-model" }

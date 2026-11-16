@@ -53,6 +53,13 @@ class MockHandler(BaseHTTPRequestHandler):
             self._send(200, {"success": True, "data": {"content": GENERATED, "template_name": "T", "page_name": "P", "applied": False}})
         elif self.path == "/api/ai/campaign":
             self._send(201, {"success": True, "data": {"content": GENERATED, "applied": True, "template_id": 7, "page_id": 8, "campaign_id": 9}})
+        elif self.path == "/api/ai/chat":
+            msg = payload.get("message", "")
+            conv = payload.get("conversation_id") or "conv-1"
+            self._send(200, {"success": True, "message": "réponse à: " + msg,
+                             "data": {"conversation_id": conv, "messages": [
+                                 {"role": "user", "content": msg},
+                                 {"role": "assistant", "content": "réponse à: " + msg}]}})
         else:
             self._send(404, {"success": False, "message": "not found"})
 
@@ -106,6 +113,18 @@ class AIAgentTest(unittest.TestCase):
         self.assertEqual(payload["groups"], ["G1", "G2"])
         self.assertEqual(payload["campaign_name"], "C")
         self.assertTrue(any(c[0] == "GET" and c[1] == "/api/campaigns/9/summary" for c in CALLS))
+
+    def test_chat_turn(self):
+        base = "http://127.0.0.1:%d" % self.port
+        conv, reply, messages = ai_agent.chat_turn(base, "k", "", "bonjour")
+        self.assertEqual(conv, "conv-1")
+        self.assertIn("bonjour", reply)
+        self.assertEqual(len(messages), 2)
+        conv2, reply2, _ = ai_agent.chat_turn(base, "k", conv, "crée un groupe")
+        self.assertEqual(conv2, "conv-1")
+        posts = [c for c in CALLS if c[1] == "/api/ai/chat"]
+        self.assertEqual(len(posts), 2)
+        self.assertEqual(posts[1][2]["conversation_id"], "conv-1")
 
     def test_ai_disabled(self):
         class DisabledHandler(MockHandler):

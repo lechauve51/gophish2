@@ -54,6 +54,35 @@ def build_brief(args):
     }
 
 
+def chat_turn(base_url, api_key, conversation_id, message):
+    payload = {"message": message}
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+    status, resp = api_call(base_url, api_key, "POST", "/api/ai/chat", payload)
+    if status != 200 or not resp.get("success"):
+        return None, "chat failed (HTTP %d): %s" % (status, resp.get("message")), None
+    data = resp.get("data", {})
+    return data.get("conversation_id"), resp.get("message", ""), data.get("messages")
+
+
+def interactive_chat(args):
+    conv_id = ""
+    print("AI assistant ready (Ctrl+D to quit). Tell it what to configure:")
+    while True:
+        try:
+            line = input("> ").strip()
+        except EOFError:
+            print()
+            return 0
+        if not line:
+            continue
+        conv_id, reply, _ = chat_turn(args.base_url, args.api_key, conv_id, line)
+        if conv_id is None:
+            print("error:", reply)
+            return 1
+        print(reply)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Drive gophish2 AI campaign generation")
     parser.add_argument("--base-url", default=os.environ.get("GOPHISH_URL", "http://127.0.0.1:3333"))
@@ -75,11 +104,19 @@ def main(argv=None):
     parser.add_argument("--smtp", default="", help="sending profile name")
     parser.add_argument("--groups", default="", help="comma-separated group names")
     parser.add_argument("--watch", type=int, default=0, help="seconds to poll the campaign summary after creation")
+    parser.add_argument("--chat", action="store_true", help="interactive chat with the conversational agent (POST /api/ai/chat)")
     args = parser.parse_args(argv)
 
     if not args.api_key:
         print("error: --api-key or GOPHISH_API_KEY is required", file=sys.stderr)
         return 2
+
+    if args.chat:
+        status, cfg = api_call(args.base_url, args.api_key, "GET", "/api/ai/config")
+        if status != 200 or not cfg.get("enabled"):
+            print("error: AI generation is not enabled on this server", file=sys.stderr)
+            return 1
+        return interactive_chat(args)
 
     status, cfg = api_call(args.base_url, args.api_key, "GET", "/api/ai/config")
     if status != 200:

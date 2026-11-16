@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gophish/gophish/ai"
 	mid "github.com/gophish/gophish/middleware"
@@ -19,10 +20,11 @@ type ServerOption func(*Server)
 // stopped. Rather, it's meant to be used as an http.Handler in the
 // AdminServer.
 type Server struct {
-	handler    http.Handler
-	worker     worker.Worker
-	limiter    *ratelimit.PostLimiter
-	aiProvider ai.Provider
+	handler         http.Handler
+	worker          worker.Worker
+	limiter         *ratelimit.PostLimiter
+	aiProvider      ai.Provider
+	aiConversations *ai.ConversationStore
 }
 
 // NewServer returns a new instance of the API handler with the provided
@@ -31,8 +33,9 @@ func NewServer(options ...ServerOption) *Server {
 	defaultWorker, _ := worker.New()
 	defaultLimiter := ratelimit.NewPostLimiter()
 	as := &Server{
-		worker:  defaultWorker,
-		limiter: defaultLimiter,
+		worker:          defaultWorker,
+		limiter:         defaultLimiter,
+		aiConversations: ai.NewConversationStore(24 * time.Hour),
 	}
 	for _, opt := range options {
 		opt(as)
@@ -99,6 +102,7 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/ai/config", as.AIConfig)
 	router.HandleFunc("/ai/generate", mid.Use(as.AIGenerate, as.limiter.Limit))
 	router.HandleFunc("/ai/campaign", mid.Use(as.AICampaign, as.limiter.Limit))
+	router.HandleFunc("/ai/chat", mid.Use(as.AIChat, as.limiter.Limit))
 	as.handler = router
 }
 

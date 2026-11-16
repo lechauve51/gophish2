@@ -190,3 +190,129 @@
         $("#aiApplyBtn").on("click", apply);
     });
 })();
+
+(function () {
+    if (typeof window.user === "undefined" || !user.api_key || typeof query !== "function") {
+        return;
+    }
+
+    var chatModalHtml = [
+        '<div class="modal fade" id="aiChatModal" tabindex="-1" role="dialog">',
+        '  <div class="modal-dialog modal-lg" role="document">',
+        '    <div class="modal-content">',
+        '      <div class="modal-header">',
+        '        <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>',
+        '        <h4 class="modal-title"><i class="fa fa-comments"></i> AI Assistant</h4>',
+        '      </div>',
+        '      <div class="modal-body">',
+        '        <div id="aiChatMessages" style="height:420px; overflow-y:auto; padding:8px; background:#f7f7f7; border:1px solid #ddd; border-radius:4px;"></div>',
+        '      </div>',
+        '      <div class="modal-footer">',
+        '        <div class="input-group">',
+        '          <input type="text" class="form-control" id="aiChatInput" placeholder="Décrivez ce que vous voulez configurer (domaine, SMTP, cibles, scénario...)" />',
+        '          <span class="input-group-btn">',
+        '            <button class="btn btn-primary" id="aiChatSend"><i class="fa fa-paper-plane"></i> Envoyer</button>',
+        '          </span>',
+        '        </div>',
+        '        <p class="help-block" style="margin-top:6px;">L\'assistant peut lire et configurer toute l\'application (templates, landing pages, groupes, profils SMTP, campagnes). La création de contenu ou le lancement d\'une campagne exige une référence d\'autorisation.</p>',
+        '      </div>',
+        '    </div>',
+        '  </div>',
+        '</div>'
+    ].join("\n");
+
+    function chatBubble(role, text, toolCalls) {
+        var cls = role === "user" ? "primary" : "default";
+        var align = role === "user" ? "text-align:right;" : "text-align:left;";
+        var html = '<div style="' + align + ' margin:6px 0;"><span class="label label-' + cls + '" style="font-size:13px; padding:6px 10px; border-radius:8px; display:inline-block; max-width:85%; white-space:pre-wrap; text-align:left;">' + escapeHtml(text || "") + "</span>";
+        if (toolCalls && toolCalls.length) {
+            var names = toolCalls.map(function (tc) { return tc.function.name; }).join(", ");
+            html += '<div style="font-size:11px; color:#888;">' + escapeHtml("outils: " + names) + "</div>";
+        }
+        html += "</div>";
+        return html;
+    }
+
+    function renderChatMessages(messages) {
+        var box = $("#aiChatMessages").empty();
+        (messages || []).forEach(function (m) {
+            if (m.role === "user" || m.role === "assistant") {
+                box.append(chatBubble(m.role, m.content, m.tool_calls));
+            }
+        });
+        box.scrollTop(box.prop("scrollHeight"));
+    }
+
+    function chatError(text) {
+        $("#aiChatMessages").append(chatBubble("assistant", "Erreur: " + text));
+        $("#aiChatMessages").scrollTop($("#aiChatMessages").prop("scrollHeight"));
+    }
+
+    function sendChatMessage() {
+        var input = $("#aiChatInput");
+        var text = input.val().trim();
+        if (!text) {
+            return;
+        }
+        input.val("");
+        $("#aiChatSend").prop("disabled", true);
+        var payload = { message: text };
+        var cid = localStorage.getItem("gophish_ai_conv");
+        if (cid) {
+            payload.conversation_id = cid;
+        }
+        $("#aiChatMessages").append(chatBubble("user", text));
+        $("#aiChatMessages").scrollTop($("#aiChatMessages").prop("scrollHeight"));
+        query("/ai/chat", "POST", payload).done(function (resp) {
+            if (resp && resp.success && resp.data) {
+                localStorage.setItem("gophish_ai_conv", resp.data.conversation_id);
+                renderChatMessages(resp.data.messages);
+            } else {
+                chatError((resp && resp.message) || "échec de la requête");
+            }
+        }).fail(function (xhr) {
+            var msg = "requête échouée";
+            try {
+                msg = JSON.parse(xhr.responseText).message || msg;
+            } catch (e) {}
+            chatError(msg);
+        }).always(function () {
+            $("#aiChatSend").prop("disabled", false);
+            input.focus();
+        });
+    }
+
+    $(document).ready(function () {
+        var openBtn = $("#aiChatOpen");
+        if (openBtn.length === 0) {
+            return;
+        }
+        $("body").append(chatModalHtml);
+        openBtn.on("click", function (e) {
+            e.preventDefault();
+            $("#aiChatModal").modal("show");
+            var cid = localStorage.getItem("gophish_ai_conv");
+            if (cid) {
+                query("/ai/chat?conversation_id=" + encodeURIComponent(cid), "GET", null).done(function (resp) {
+                    if (resp && resp.success && resp.data) {
+                        renderChatMessages(resp.data.messages);
+                        return;
+                    }
+                    $("#aiChatMessages").empty();
+                }).fail(function () {
+                    localStorage.removeItem("gophish_ai_conv");
+                    $("#aiChatMessages").empty();
+                });
+            } else {
+                $("#aiChatMessages").empty().append(chatBubble("assistant", "Bonjour ! Je suis l\'assistant gophish2. Dites-moi ce que vous voulez configurer : domaine de phishing, serveur SMTP, groupes de cibles, scénario de campagne..."));
+            }
+        });
+        $("#aiChatSend").on("click", sendChatMessage);
+        $("#aiChatInput").on("keydown", function (e) {
+            if (e.which === 13) {
+                e.preventDefault();
+                sendChatMessage();
+            }
+        });
+    });
+})();
