@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/ioutil"
 	"os"
@@ -74,5 +75,55 @@ func TestLoadConfig(t *testing.T) {
 	_, err = LoadConfig("bogusfile")
 	if err == nil {
 		t.Fatalf("expected error when loading invalid config, but got %v", err)
+	}
+}
+
+func TestLoadConfigAIKeyFromEnvOnly(t *testing.T) {
+	configWithAIKey := []byte(`{
+	"db_name": "sqlite3",
+	"db_path": "gophish.db",
+	"migrations_prefix": "db/db_",
+	"ai": {
+		"enabled": true,
+		"base_url": "http://localhost:11434/v1",
+		"model": "llama3",
+		"api_key": "must-be-ignored"
+	}
+	}`)
+	f := createTemporaryConfig(t)
+	defer removeTemporaryConfig(t, f)
+	if _, err := f.Write(configWithAIKey); err != nil {
+		t.Fatalf("error writing config to temporary file: %v", err)
+	}
+
+	os.Setenv(AIEnvAPIKey, "env-secret-key")
+	defer os.Unsetenv(AIEnvAPIKey)
+
+	conf, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("error loading config: %v", err)
+	}
+	if conf.AI.APIKey != "env-secret-key" {
+		t.Fatalf("API key must come from the environment, got %q", conf.AI.APIKey)
+	}
+	if !conf.AI.Enabled || conf.AI.BaseURL != "http://localhost:11434/v1" || conf.AI.Model != "llama3" {
+		t.Fatalf("AI config not loaded correctly: %+v", conf.AI)
+	}
+	// The key must never be serialized back to JSON
+	raw, err := json.Marshal(conf.AI)
+	if err != nil {
+		t.Fatalf("error marshaling AI config: %v", err)
+	}
+	if string(raw) == "" || bytes.Contains(raw, []byte("env-secret-key")) || bytes.Contains(raw, []byte("api_key")) {
+		t.Fatalf("AI API key leaked in serialized config: %s", raw)
+	}
+
+	os.Unsetenv(AIEnvAPIKey)
+	conf2, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("error loading config: %v", err)
+	}
+	if conf2.AI.APIKey != "" {
+		t.Fatalf("API key should be empty without env var, got %q", conf2.AI.APIKey)
 	}
 }

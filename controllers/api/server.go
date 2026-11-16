@@ -2,7 +2,9 @@ package api
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/gophish/gophish/ai"
 	mid "github.com/gophish/gophish/middleware"
 	"github.com/gophish/gophish/middleware/ratelimit"
 	"github.com/gophish/gophish/models"
@@ -18,9 +20,11 @@ type ServerOption func(*Server)
 // stopped. Rather, it's meant to be used as an http.Handler in the
 // AdminServer.
 type Server struct {
-	handler http.Handler
-	worker  worker.Worker
-	limiter *ratelimit.PostLimiter
+	handler         http.Handler
+	worker          worker.Worker
+	limiter         *ratelimit.PostLimiter
+	aiProvider      ai.Provider
+	aiConversations *ai.ConversationStore
 }
 
 // NewServer returns a new instance of the API handler with the provided
@@ -29,8 +33,9 @@ func NewServer(options ...ServerOption) *Server {
 	defaultWorker, _ := worker.New()
 	defaultLimiter := ratelimit.NewPostLimiter()
 	as := &Server{
-		worker:  defaultWorker,
-		limiter: defaultLimiter,
+		worker:          defaultWorker,
+		limiter:         defaultLimiter,
+		aiConversations: ai.NewConversationStore(24 * time.Hour),
 	}
 	for _, opt := range options {
 		opt(as)
@@ -49,6 +54,14 @@ func WithWorker(w worker.Worker) ServerOption {
 func WithLimiter(limiter *ratelimit.PostLimiter) ServerOption {
 	return func(as *Server) {
 		as.limiter = limiter
+	}
+}
+
+// WithAIProvider sets the AI provider used by the /api/ai/ endpoints. A nil
+// provider disables the endpoints.
+func WithAIProvider(p ai.Provider) ServerOption {
+	return func(as *Server) {
+		as.aiProvider = p
 	}
 }
 
@@ -86,6 +99,10 @@ func (as *Server) registerRoutes() {
 	router.HandleFunc("/webhooks/", mid.Use(as.Webhooks, mid.RequirePermission(models.PermissionModifySystem)))
 	router.HandleFunc("/webhooks/{id:[0-9]+}/validate", mid.Use(as.ValidateWebhook, mid.RequirePermission(models.PermissionModifySystem)))
 	router.HandleFunc("/webhooks/{id:[0-9]+}", mid.Use(as.Webhook, mid.RequirePermission(models.PermissionModifySystem)))
+	router.HandleFunc("/ai/config", as.AIConfig)
+	router.HandleFunc("/ai/generate", mid.Use(as.AIGenerate, as.limiter.Limit))
+	router.HandleFunc("/ai/campaign", mid.Use(as.AICampaign, as.limiter.Limit))
+	router.HandleFunc("/ai/chat", mid.Use(as.AIChat, as.limiter.Limit))
 	as.handler = router
 }
 
