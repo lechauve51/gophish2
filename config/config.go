@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
 
 	log "github.com/gophish/gophish/logger"
 )
@@ -26,6 +27,23 @@ type PhishServer struct {
 	KeyPath   string `json:"key_path"`
 }
 
+// AIEnvAPIKey is the environment variable holding the API key for the AI
+// provider. The key is never read from the config file so it cannot be
+// committed or logged by accident.
+const AIEnvAPIKey = "GOPHISH_AI_API_KEY"
+
+// AIConfig represents the configuration of the AI-assisted campaign
+// generation feature. BaseURL must point to an OpenAI-compatible
+// /chat/completions endpoint (OpenAI, Mistral, Ollama, vLLM, etc.).
+type AIConfig struct {
+	Enabled        bool   `json:"enabled"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model"`
+	APIKey         string `json:"-"`
+	MaxTokens      int    `json:"max_tokens"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
 // Config represents the configuration information.
 type Config struct {
 	AdminConf      AdminServer `json:"admin_server"`
@@ -37,6 +55,7 @@ type Config struct {
 	TestFlag       bool        `json:"test_flag"`
 	ContactAddress string      `json:"contact_address"`
 	Logging        *log.Config `json:"logging"`
+	AI             AIConfig    `json:"ai"`
 }
 
 // Version contains the current gophish version
@@ -60,6 +79,8 @@ func LoadConfig(filepath string) (*Config, error) {
 	if config.Logging == nil {
 		config.Logging = &log.Config{}
 	}
+	// The AI provider API key is only ever taken from the environment.
+	config.AI.APIKey = os.Getenv(AIEnvAPIKey)
 	// Choosing the migrations directory based on the database used.
 	config.MigrationsPath = config.MigrationsPath + config.DBName
 	// Explicitly set the TestFlag to false to prevent config.json overrides

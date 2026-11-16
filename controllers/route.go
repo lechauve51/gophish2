@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/NYTimes/gziphandler"
+	"github.com/gophish/gophish/ai"
 	"github.com/gophish/gophish/auth"
 	"github.com/gophish/gophish/config"
 	ctx "github.com/gophish/gophish/context"
@@ -39,6 +40,7 @@ type AdminServer struct {
 	worker  worker.Worker
 	config  config.AdminServer
 	limiter *ratelimit.PostLimiter
+	aiConf  config.AIConfig
 }
 
 var defaultTLSConfig = &tls.Config{
@@ -66,6 +68,13 @@ var defaultTLSConfig = &tls.Config{
 func WithWorker(w worker.Worker) AdminServerOption {
 	return func(as *AdminServer) {
 		as.worker = w
+	}
+}
+
+// WithAIConfig is an option that sets the AI generation configuration.
+func WithAIConfig(c config.AIConfig) AdminServerOption {
+	return func(as *AdminServer) {
+		as.aiConf = c
 	}
 }
 
@@ -141,6 +150,7 @@ func (as *AdminServer) registerRoutes() {
 	api := api.NewServer(
 		api.WithWorker(as.worker),
 		api.WithLimiter(as.limiter),
+		api.WithAIProvider(ai.NewProviderFromConfig(as.aiConf)),
 	)
 	router.PathPrefix("/api/").Handler(api)
 
