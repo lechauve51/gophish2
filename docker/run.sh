@@ -81,6 +81,38 @@ if [ -n "${DB_FILE_PATH+set}" ] ; then
         cat config.json.tmp > config.json
 fi
 
+# set ai config (the provider API key is passed via GOPHISH_AI_API_KEY env var)
+if [ -n "${AI_ENABLED+set}" ] ; then
+    jq -r \
+        --argjson AI_ENABLED "${AI_ENABLED}" \
+        '.ai.enabled = $AI_ENABLED' config.json > config.json.tmp && \
+        cat config.json.tmp > config.json
+fi
+if [ -n "${AI_BASE_URL+set}" ] ; then
+    jq -r \
+        --arg AI_BASE_URL "${AI_BASE_URL}" \
+        '.ai.base_url = $AI_BASE_URL' config.json > config.json.tmp && \
+        cat config.json.tmp > config.json
+fi
+if [ -n "${AI_MODEL+set}" ] ; then
+    jq -r \
+        --arg AI_MODEL "${AI_MODEL}" \
+        '.ai.model = $AI_MODEL' config.json > config.json.tmp && \
+        cat config.json.tmp > config.json
+fi
+if [ -n "${AI_MAX_TOKENS+set}" ] ; then
+    jq -r \
+        --argjson AI_MAX_TOKENS "${AI_MAX_TOKENS}" \
+        '.ai.max_tokens = $AI_MAX_TOKENS' config.json > config.json.tmp && \
+        cat config.json.tmp > config.json
+fi
+if [ -n "${AI_TIMEOUT_SECONDS+set}" ] ; then
+    jq -r \
+        --argjson AI_TIMEOUT_SECONDS "${AI_TIMEOUT_SECONDS}" \
+        '.ai.timeout_seconds = $AI_TIMEOUT_SECONDS' config.json > config.json.tmp && \
+        cat config.json.tmp > config.json
+fi
+
 echo "Runtime configuration: "
 cat config.json
 
